@@ -28,7 +28,9 @@ make build-linux
 
 GitHub Actions runs tests and cross-compiles macOS/Linux binaries on every push to `main` and every pull request.
 
-Tagged releases are handled by GoReleaser. Push a semver tag to publish a GitHub release:
+Tagged releases are handled by GoReleaser. Run the GitHub Actions `Release` workflow with a semver tag such as `v0.1.0` to create the tag and publish a GitHub release with downloadable artifacts.
+
+You can also push a semver tag yourself to publish a release:
 
 ```sh
 git tag v0.1.0
