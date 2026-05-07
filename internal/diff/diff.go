@@ -2,9 +2,10 @@ package diff
 
 import (
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
+
+	sourcediff "github.com/sourcegraph/go-diff/diff"
 )
 
 type LineKind int
@@ -84,62 +85,31 @@ type Row struct {
 	File      *File
 }
 
-var hunkPattern = regexp.MustCompile(`^@@ -([0-9]+)(?:,([0-9]+))? \+([0-9]+)(?:,([0-9]+))? @@`)
-
 func Parse(raw string) []File {
-	lines := strings.Split(raw, "\n")
-
-	var files []File
-	var current *File
-	var oldLine, newLine int
-
-	flush := func() {
-		if current != nil {
-			files = append(files, *current)
-			current = nil
-		}
+	parsed, err := sourcediff.ParseMultiFileDiff([]byte(raw))
+	if err != nil {
+		return nil
 	}
 
-	for i, line := range lines {
-		if i == len(lines)-1 && line == "" {
-			continue
+	files := make([]File, 0, len(parsed))
+	for _, parsedFile := range parsed {
+		file := File{
+			Header:  fileHeader(parsedFile),
+			OldPath: parsePath(parsedFile.OrigName),
+			NewPath: parsePath(parsedFile.NewName),
 		}
-
-		if strings.HasPrefix(line, "diff --git ") {
-			flush()
-			oldPath, newPath := parseDiffHeader(line)
-			current = &File{Header: line, OldPath: oldPath, NewPath: newPath}
-			continue
+		for _, parsedHunk := range parsedFile.Hunks {
+			oldLine := int(parsedHunk.OrigStartLine)
+			newLine := int(parsedHunk.NewStartLine)
+			hunk := Hunk{Header: hunkHeader(parsedHunk)}
+			for _, line := range hunkBodyLines(parsedHunk.Body) {
+				hunk.Lines = append(hunk.Lines, parseLine(line, file.DisplayPath(), &oldLine, &newLine))
+			}
+			file.Hunks = append(file.Hunks, hunk)
 		}
-
-		if current == nil {
-			continue
-		}
-
-		if strings.HasPrefix(line, "--- ") {
-			current.OldPath = parsePath(line[4:])
-			continue
-		}
-		if strings.HasPrefix(line, "+++ ") {
-			current.NewPath = parsePath(line[4:])
-			continue
-		}
-
-		if strings.HasPrefix(line, "@@ ") {
-			oldLine, newLine = parseHunkStart(line)
-			current.Hunks = append(current.Hunks, Hunk{Header: line})
-			continue
-		}
-
-		if len(current.Hunks) == 0 {
-			continue
-		}
-
-		hunk := &current.Hunks[len(current.Hunks)-1]
-		hunk.Lines = append(hunk.Lines, parseLine(line, current.DisplayPath(), &oldLine, &newLine))
+		files = append(files, file)
 	}
 
-	flush()
 	return files
 }
 
@@ -221,22 +191,34 @@ func parseLine(text string, file string, oldLine *int, newLine *int) Line {
 	}
 }
 
-func parseHunkStart(header string) (int, int) {
-	match := hunkPattern.FindStringSubmatch(header)
-	if match == nil {
-		return 0, 0
+func fileHeader(file *sourcediff.FileDiff) string {
+	if len(file.Extended) > 0 {
+		return file.Extended[0]
 	}
-	oldStart, _ := strconv.Atoi(match[1])
-	newStart, _ := strconv.Atoi(match[3])
-	return oldStart, newStart
+	return fmt.Sprintf("diff --git %s %s", file.OrigName, file.NewName)
 }
 
-func parseDiffHeader(header string) (string, string) {
-	parts := strings.Fields(strings.TrimPrefix(header, "diff --git "))
-	if len(parts) < 2 {
-		return "", ""
+func hunkHeader(hunk *sourcediff.Hunk) string {
+	header := fmt.Sprintf("@@ %s %s @@", hunkRange("-", hunk.OrigStartLine, hunk.OrigLines), hunkRange("+", hunk.NewStartLine, hunk.NewLines))
+	if hunk.Section != "" {
+		header += " " + hunk.Section
 	}
-	return parsePath(parts[0]), parsePath(parts[1])
+	return header
+}
+
+func hunkRange(prefix string, start int32, count int32) string {
+	if count == 1 {
+		return fmt.Sprintf("%s%d", prefix, start)
+	}
+	return fmt.Sprintf("%s%d,%d", prefix, start, count)
+}
+
+func hunkBodyLines(body []byte) []string {
+	lines := strings.Split(string(body), "\n")
+	if len(lines) > 0 && lines[len(lines)-1] == "" {
+		lines = lines[:len(lines)-1]
+	}
+	return lines
 }
 
 func parsePath(path string) string {
