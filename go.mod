@@ -1,4 +1,4 @@
-module github.com/alex/git-review-tui
+module github.com/alexfedosov/diffnotes
 
 go 1.24.2
 

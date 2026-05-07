@@ -6,13 +6,13 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/charmbracelet/bubbles/textinput"
+	"github.com/charmbracelet/bubbles/textarea"
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/alex/git-review-tui/internal/clipboard"
-	"github.com/alex/git-review-tui/internal/comments"
-	"github.com/alex/git-review-tui/internal/diff"
-	"github.com/alex/git-review-tui/internal/git"
+	"github.com/alexfedosov/diffnotes/internal/clipboard"
+	"github.com/alexfedosov/diffnotes/internal/comments"
+	"github.com/alexfedosov/diffnotes/internal/diff"
+	"github.com/alexfedosov/diffnotes/internal/git"
 )
 
 type focusPane int
@@ -43,16 +43,17 @@ type Model struct {
 	loadedSource   git.Source
 	loadedSourceID string
 
-	files       []diff.File
-	rows        []diff.Row
-	selectedRow int
-	diffOffset  int
+	files        []diff.File
+	rows         []diff.Row
+	selectedRow  int
+	diffOffset   int
+	commentsOnly bool
 
 	focus focusPane
 	mode  mode
 
 	notes  *comments.Store
-	input  textinput.Model
+	input  textarea.Model
 	editID string
 
 	status  string
@@ -73,10 +74,14 @@ type diffLoadedMsg struct {
 }
 
 func NewModel(path string, commitLimit int) Model {
-	input := textinput.New()
+	input := textarea.New()
 	input.Placeholder = "Leave a review comment"
-	input.Prompt = "> "
-	input.CharLimit = 1000
+	input.Prompt = ""
+	input.ShowLineNumbers = false
+	input.EndOfBufferCharacter = ' '
+	input.CharLimit = 2000
+	input.SetHeight(1)
+	input.SetWidth(40)
 
 	return Model{
 		cwd:         path,
@@ -97,7 +102,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
 		m.height = msg.Height
-		m.input.Width = max(20, msg.Width-4)
+		m.configureEditor()
 		m.ensureVisible()
 		return m, nil
 
@@ -168,6 +173,8 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.loading = true
 		m.status = "reloading repository"
 		return m, loadSourcesCmd(m.cwd, m.commitLimit)
+	case "z":
+		m.toggleCommentsOnly()
 	case "up", "k":
 		if m.focus == focusSources {
 			m.moveSource(-1)
@@ -189,7 +196,7 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selectedSource = 0
 			m.sourceOffset = 0
 		} else {
-			m.selectedRow = 0
+			m.selectDisplayRow(0)
 			m.diffOffset = 0
 		}
 	case "G":
@@ -197,7 +204,7 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.selectedSource = max(0, len(m.sources)-1)
 			m.ensureSourceVisible()
 		} else {
-			m.selectedRow = max(0, len(m.rows)-1)
+			m.selectDisplayRow(len(m.displayRows()) - 1)
 			m.ensureDiffVisible()
 		}
 	case "enter", "o":
@@ -217,6 +224,7 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) updateEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
+	m.configureEditor()
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
 		switch msg.String() {
@@ -233,6 +241,8 @@ func (m Model) updateEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	m.configureEditor()
+	m.ensureEditorVisible()
 	return m, cmd
 }
 
@@ -268,9 +278,9 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			}
 		} else {
 			m.focus = focusDiff
-			rowIndex := m.diffOffset + bodyY
-			if rowIndex >= 0 && rowIndex < len(m.rows) {
-				m.selectedRow = rowIndex
+			visible := m.visibleDiffLineAt(bodyY, m.diffWidth())
+			if visible.rowIndex >= 0 && visible.rowIndex < len(m.rows) {
+				m.selectedRow = visible.rowIndex
 			}
 		}
 	}
@@ -305,6 +315,8 @@ func (m *Model) startEdit() {
 	m.mode = modeEditing
 	m.input.Focus()
 	m.input.CursorEnd()
+	m.configureEditor()
+	m.ensureEditorVisible()
 	m.status = fmt.Sprintf("commenting on %s:%d", line.Anchor.File, line.Anchor.Line)
 }
 
@@ -356,6 +368,17 @@ func (m *Model) deleteCurrentNote() {
 	m.status = "no comment on selected line"
 }
 
+func (m *Model) toggleCommentsOnly() {
+	m.commentsOnly = !m.commentsOnly
+	m.diffOffset = 0
+	if m.commentsOnly {
+		m.status = "showing comments with 3 lines of context"
+	} else {
+		m.status = "showing full diff"
+	}
+	m.ensureDiffVisible()
+}
+
 func (m *Model) copyNotes() {
 	notes := m.notes.List()
 	if len(notes) == 0 {
@@ -391,10 +414,16 @@ func (m *Model) moveSource(delta int) {
 }
 
 func (m *Model) moveRow(delta int) {
-	if len(m.rows) == 0 {
+	displayRows := m.displayRows()
+	if len(displayRows) == 0 {
 		return
 	}
-	m.selectedRow = clamp(m.selectedRow+delta, 0, len(m.rows)-1)
+	pos := m.displayIndexOf(m.selectedRow, displayRows)
+	if pos < 0 {
+		pos = 0
+	}
+	pos = clamp(pos+delta, 0, len(displayRows)-1)
+	m.selectedRow = displayRows[pos]
 	m.ensureDiffVisible()
 }
 
@@ -418,6 +447,7 @@ func (m *Model) toggleFocus() {
 func (m *Model) ensureVisible() {
 	m.ensureSourceVisible()
 	m.ensureDiffVisible()
+	m.ensureEditorVisible()
 }
 
 func (m *Model) ensureSourceVisible() {
@@ -432,14 +462,175 @@ func (m *Model) ensureSourceVisible() {
 }
 
 func (m *Model) ensureDiffVisible() {
+	displayRows := m.displayRows()
+	if len(displayRows) == 0 {
+		m.diffOffset = 0
+		m.selectedRow = 0
+		return
+	}
+
+	selectedPos := m.displayIndexOf(m.selectedRow, displayRows)
+	if selectedPos < 0 {
+		selectedPos = firstSelectableDisplayIndex(displayRows, m.rows)
+		m.selectedRow = displayRows[selectedPos]
+	}
+
 	visible := max(1, m.bodyHeight())
-	if m.selectedRow < m.diffOffset {
-		m.diffOffset = m.selectedRow
+	if selectedPos < m.diffOffset {
+		m.diffOffset = selectedPos
 	}
-	if m.selectedRow >= m.diffOffset+visible {
-		m.diffOffset = m.selectedRow - visible + 1
+	if selectedPos >= m.diffOffset+visible {
+		m.diffOffset = selectedPos - visible + 1
 	}
-	m.diffOffset = max(0, m.diffOffset)
+	m.diffOffset = clamp(m.diffOffset, 0, len(displayRows)-1)
+}
+
+func (m *Model) ensureEditorVisible() {
+	if m.mode != modeEditing || m.selectedRow < 0 || m.selectedRow >= len(m.rows) {
+		return
+	}
+	displayRows := m.displayRows()
+	selectedPos := m.displayIndexOf(m.selectedRow, displayRows)
+	if selectedPos < 0 {
+		return
+	}
+	if selectedPos < m.diffOffset {
+		m.diffOffset = selectedPos
+	}
+	for m.diffOffset < selectedPos && m.visualLineForRow(m.selectedRow)+m.editorVisualHeight() >= m.bodyHeight() {
+		m.diffOffset++
+	}
+}
+
+func (m *Model) visualLineForRow(targetRow int) int {
+	displayRows := m.displayRows()
+	targetPos := m.displayIndexOf(targetRow, displayRows)
+	if targetPos < m.diffOffset {
+		return -1
+	}
+	visualLine := 0
+	for displayIndex := m.diffOffset; displayIndex < len(displayRows); displayIndex++ {
+		rowIndex := displayRows[displayIndex]
+		if rowIndex == targetRow {
+			return visualLine
+		}
+		visualLine++
+		if m.mode == modeEditing && rowIndex == m.selectedRow {
+			visualLine += m.editorVisualHeight()
+		} else {
+			visualLine += len(m.inlineCommentsForRow(rowIndex, m.diffWidth()))
+		}
+	}
+	return -1
+}
+
+func (m *Model) selectDisplayRow(displayIndex int) {
+	displayRows := m.displayRows()
+	if len(displayRows) == 0 {
+		m.selectedRow = 0
+		return
+	}
+	displayIndex = clamp(displayIndex, 0, len(displayRows)-1)
+	m.selectedRow = displayRows[displayIndex]
+}
+
+func (m Model) displayIndexOf(rowIndex int, displayRows []int) int {
+	for i, displayRow := range displayRows {
+		if displayRow == rowIndex {
+			return i
+		}
+	}
+	return -1
+}
+
+func (m Model) displayRows() []int {
+	if !m.commentsOnly {
+		rows := make([]int, len(m.rows))
+		for i := range m.rows {
+			rows[i] = i
+		}
+		return rows
+	}
+	return m.foldedRows()
+}
+
+func (m Model) foldedRows() []int {
+	commentRowsByFile := make(map[int][]int)
+	fileHeaderByFile := make(map[int]int)
+	for rowIndex, row := range m.rows {
+		if row.Type == diff.RowFile {
+			fileHeaderByFile[row.FileIndex] = rowIndex
+			continue
+		}
+		if row.Type != diff.RowLine || row.Line == nil {
+			continue
+		}
+		if _, ok := m.noteForLine(*row.Line); ok {
+			commentRowsByFile[row.FileIndex] = append(commentRowsByFile[row.FileIndex], rowIndex)
+		}
+	}
+	if len(commentRowsByFile) == 0 {
+		return nil
+	}
+
+	var rows []int
+	emitted := make(map[int]bool)
+	for _, row := range m.rows {
+		if row.Type != diff.RowFile {
+			continue
+		}
+		commentRows := commentRowsByFile[row.FileIndex]
+		if len(commentRows) == 0 {
+			continue
+		}
+		if header, ok := fileHeaderByFile[row.FileIndex]; ok {
+			rows = appendFoldedRow(rows, emitted, header)
+		}
+		for _, commentRow := range commentRows {
+			for _, contextRow := range m.previousLineRows(commentRow, row.FileIndex, 3) {
+				rows = appendFoldedRow(rows, emitted, contextRow)
+			}
+			rows = appendFoldedRow(rows, emitted, commentRow)
+		}
+	}
+	return rows
+}
+
+func (m Model) previousLineRows(rowIndex int, fileIndex int, count int) []int {
+	var rows []int
+	for i := rowIndex - 1; i >= 0 && len(rows) < count; i-- {
+		row := m.rows[i]
+		if row.FileIndex != fileIndex {
+			break
+		}
+		if row.Type != diff.RowLine {
+			continue
+		}
+		rows = append([]int{i}, rows...)
+	}
+	return rows
+}
+
+func appendFoldedRow(rows []int, emitted map[int]bool, row int) []int {
+	if emitted[row] {
+		return rows
+	}
+	emitted[row] = true
+	return append(rows, row)
+}
+
+func firstSelectableDisplayIndex(displayRows []int, rows []diff.Row) int {
+	for i, rowIndex := range displayRows {
+		if rowIndex >= 0 && rowIndex < len(rows) && rows[rowIndex].Type == diff.RowLine {
+			return i
+		}
+	}
+	return 0
+}
+
+func (m *Model) configureEditor() {
+	m.input.SetWidth(m.editorInputWidth())
+	m.input.SetHeight(m.editorTextHeight())
 }
 
 func loadSourcesCmd(path string, commitLimit int) tea.Cmd {

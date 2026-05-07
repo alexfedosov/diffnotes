@@ -1,19 +1,20 @@
-# git-review-tui
+# diffnotes
 
-A terminal Git review tool for leaving local comments on unstaged changes or recent commits, then copying all comments into the system clipboard for an LLM coding agent.
+A terminal Git review tool for leaving local comments on staged changes, unstaged changes, untracked files, or recent commits, then copying all comments into the system clipboard for an LLM coding agent.
 
 The layout is intentionally close to a GitHub pull request diff: file headers, hunk headers, old and new line number columns, green additions, red deletions, and per-line comment markers.
+Saved comments are rendered inline directly below the diff line they are attached to. While adding or editing, the comment input appears inline in that same location and wraps long text.
 
 ## Install
 
 ```sh
-go install ./cmd/git-review-tui
+go install ./cmd/diffnotes
 ```
 
 Or run from this checkout:
 
 ```sh
-go run ./cmd/git-review-tui --repo /path/to/repo
+go run ./cmd/diffnotes --repo /path/to/repo
 ```
 
 Build release-ish local binaries:
@@ -30,6 +31,7 @@ make build-linux
 - `enter` or `o` in the sidebar: open the selected source
 - `enter`, `a`, or `e` in the diff: add or edit a comment on the selected line
 - `d` or `x`: delete the comment on the selected line
+- `z`: toggle folded comment view, showing each comment with three lines above it grouped by file
 - `c` or `y`: copy all comments to the system clipboard
 - `r`: reload repository sources
 - `q`: quit

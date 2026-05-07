@@ -7,7 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/alex/git-review-tui/internal/tui"
+	"github.com/alexfedosov/diffnotes/internal/tui"
 )
 
 var version = "dev"
@@ -26,7 +26,7 @@ func main() {
 	model := tui.NewModel(*repoPath, *commitLimit)
 	program := tea.NewProgram(model, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := program.Run(); err != nil {
-		fmt.Fprintf(os.Stderr, "git-review-tui: %v\n", err)
+		fmt.Fprintf(os.Stderr, "diffnotes: %v\n", err)
 		os.Exit(1)
 	}
 }

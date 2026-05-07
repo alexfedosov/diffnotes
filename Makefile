@@ -1,10 +1,10 @@
 .PHONY: build build-linux test vet clean
 
 build:
-	go build -o bin/git-review-tui ./cmd/git-review-tui
+	go build -o bin/diffnotes ./cmd/diffnotes
 
 build-linux:
-	GOOS=linux GOARCH=amd64 go build -o bin/git-review-tui-linux-amd64 ./cmd/git-review-tui
+	GOOS=linux GOARCH=amd64 go build -o bin/diffnotes-linux-amd64 ./cmd/diffnotes
 
 test:
 	go test ./...

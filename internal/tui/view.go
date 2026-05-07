@@ -6,11 +6,17 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
-	"github.com/alex/git-review-tui/internal/comments"
-	"github.com/alex/git-review-tui/internal/diff"
+	"github.com/alexfedosov/diffnotes/internal/comments"
+	"github.com/alexfedosov/diffnotes/internal/diff"
 )
 
 const sidebarHeaderLines = 2
+const editorMaxTextRows = 8
+
+const (
+	editorIndent       = "              "
+	editorContinuation = "                "
+)
 
 var (
 	headerStyle = lipgloss.NewStyle().
@@ -57,8 +63,21 @@ var (
 			Foreground(lipgloss.Color("#8b949e")).
 			Background(lipgloss.Color("#0d1117")).
 			Italic(true)
+	commentStyle = lipgloss.NewStyle().
+			Foreground(lipgloss.Color("#f2cc60")).
+			Background(lipgloss.Color("#161b22"))
+	commentEditorStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#f0f6fc")).
+				Background(lipgloss.Color("#1f2937")).
+				Bold(true)
 	selectedDiffStyle = lipgloss.NewStyle().
-				Background(lipgloss.Color("#1f2937"))
+				Foreground(lipgloss.Color("#0d1117")).
+				Background(lipgloss.Color("#f2cc60")).
+				Bold(true)
+	selectedBlurredStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#f0f6fc")).
+				Background(lipgloss.Color("#30363d")).
+				Bold(true)
 	focusedBorderStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#58a6ff"))
 	unfocusedBorderStyle = lipgloss.NewStyle().
@@ -72,7 +91,7 @@ func (m Model) View() string {
 
 	bodyHeight := m.bodyHeight()
 	sidebarWidth := m.sidebarWidth()
-	diffWidth := max(10, m.width-sidebarWidth-1)
+	diffWidth := m.diffWidth()
 
 	sidebar := m.renderSidebar(bodyHeight, sidebarWidth)
 	diffPane := m.renderDiff(bodyHeight, diffWidth)
@@ -95,9 +114,12 @@ func (m Model) renderHeader() string {
 	if source == "" {
 		source = "no source"
 	}
-	prefix := " git-review-tui "
+	prefix := " diffnotes "
 	repo := displayRepo(m.repo)
 	text := fmt.Sprintf("%s repo:%s  source:%s  comments:%d", prefix, repo, source, m.notes.Len())
+	if m.commentsOnly {
+		text += "  view:comments"
+	}
 	if m.loading {
 		text += "  loading"
 	}
@@ -106,11 +128,11 @@ func (m Model) renderHeader() string {
 
 func (m Model) renderFooter() string {
 	if m.mode == modeEditing {
-		text := " " + m.input.View() + "  enter save  esc cancel"
+		text := " editing inline comment  enter save  esc cancel"
 		return footerStyle.Width(m.width).Render(fit(text, m.width))
 	}
 
-	text := " tab focus  j/k move  enter open/comment  a/e edit  d delete  c copy comments  r reload  q quit"
+	text := " tab focus  j/k move  enter open/comment  a/e edit  d delete  z fold-comments  c copy  r reload  q quit"
 	if m.status != "" {
 		text = m.status + " | " + text
 	}
@@ -165,8 +187,12 @@ func (m Model) renderSidebar(height int, width int) []string {
 
 func (m Model) renderDiff(height int, width int) []string {
 	lines := make([]string, 0, height)
-	if len(m.rows) == 0 {
+	displayRows := m.displayRows()
+	if len(displayRows) == 0 {
 		message := " No diff to show. Pick a commit or create unstaged changes."
+		if m.commentsOnly {
+			message = " No comments on this source. Press z to return to the full diff."
+		}
 		for len(lines) < height {
 			if len(lines) == 0 {
 				lines = append(lines, contextStyle.Width(width).Render(fit(message, width)))
@@ -178,14 +204,65 @@ func (m Model) renderDiff(height int, width int) []string {
 	}
 
 	for i := 0; i < height; i++ {
-		index := m.diffOffset + i
-		if index >= len(m.rows) {
+		visible := m.visibleDiffLineAt(i, width)
+		if visible.rowIndex < 0 {
 			lines = append(lines, contextStyle.Width(width).Render(strings.Repeat(" ", width)))
 			continue
 		}
-		lines = append(lines, m.renderDiffRow(m.rows[index], width, index == m.selectedRow))
+		if visible.editor {
+			lines = append(lines, m.renderEditorRow(width, visible.editorLine))
+			continue
+		}
+		if visible.comment != "" {
+			lines = append(lines, m.renderCommentRow(visible.comment, width))
+			continue
+		}
+		lines = append(lines, m.renderDiffRow(m.rows[visible.rowIndex], width, visible.rowIndex == m.selectedRow))
 	}
 	return lines
+}
+
+type visibleDiffLine struct {
+	rowIndex   int
+	comment    string
+	editor     bool
+	editorLine int
+}
+
+func (m Model) visibleDiffLineAt(screenLine int, width int) visibleDiffLine {
+	if screenLine < 0 {
+		return visibleDiffLine{rowIndex: -1}
+	}
+
+	displayRows := m.displayRows()
+	visualLine := 0
+	for displayIndex := m.diffOffset; displayIndex < len(displayRows); displayIndex++ {
+		rowIndex := displayRows[displayIndex]
+		if visualLine == screenLine {
+			return visibleDiffLine{rowIndex: rowIndex}
+		}
+		visualLine++
+
+		if m.mode == modeEditing && rowIndex == m.selectedRow {
+			editorRows := m.editorRows(width)
+			for editorLine := range editorRows {
+				if visualLine == screenLine {
+					return visibleDiffLine{rowIndex: rowIndex, editor: true, editorLine: editorLine}
+				}
+				visualLine++
+			}
+			continue
+		}
+
+		for _, comment := range m.inlineCommentsForRow(rowIndex, width) {
+			if visualLine == screenLine {
+				return visibleDiffLine{rowIndex: rowIndex, comment: comment}
+			}
+			visualLine++
+		}
+	}
+
+	return visibleDiffLine{rowIndex: -1}
 }
 
 func (m Model) renderDiffRow(row diff.Row, width int, selected bool) string {
@@ -212,8 +289,14 @@ func (m Model) renderDiffRow(row diff.Row, width int, selected bool) string {
 		text = ""
 	}
 
-	if selected && m.focus == focusDiff {
-		style = style.Copy().Inherit(selectedDiffStyle)
+	if selected {
+		if m.focus == focusDiff {
+			style = selectedDiffStyle
+			text = "> " + text
+		} else {
+			style = selectedBlurredStyle
+			text = "  " + text
+		}
 	}
 	return style.Width(width).Render(fit(text, width))
 }
@@ -244,6 +327,51 @@ func (m Model) renderCodeLine(line diff.Line) (string, lipgloss.Style) {
 	return fmt.Sprintf("%s %s %s %s %s", oldNo, newNo, note, prefix, line.Content), style
 }
 
+func (m Model) renderCommentRow(text string, width int) string {
+	return commentStyle.Width(width).Render(fit(text, width))
+}
+
+func (m Model) renderEditorRow(width int, lineIndex int) string {
+	rows := m.editorRows(width)
+	if lineIndex < 0 || lineIndex >= len(rows) {
+		return commentEditorStyle.Width(width).Render(strings.Repeat(" ", width))
+	}
+	return commentEditorStyle.Width(width).Render(fit(rows[lineIndex], width))
+}
+
+func (m Model) editorRows(width int) []string {
+	label := "add comment: "
+	if line, ok := m.currentLine(); ok {
+		if _, exists := m.noteForLine(*line); exists {
+			label = "edit comment: "
+		}
+	}
+
+	rows := []string{editorIndent + label}
+	input := m.input
+	input.SetWidth(m.editorInputWidth())
+	input.SetHeight(m.editorTextHeight())
+	for _, line := range strings.Split(strings.TrimRight(input.View(), "\n"), "\n") {
+		rows = append(rows, editorContinuation+line)
+	}
+	return rows
+}
+
+func (m Model) inlineCommentsForRow(rowIndex int, width int) []string {
+	if rowIndex < 0 || rowIndex >= len(m.rows) {
+		return nil
+	}
+	row := m.rows[rowIndex]
+	if row.Type != diff.RowLine || row.Line == nil {
+		return nil
+	}
+	note, ok := m.noteForLine(*row.Line)
+	if !ok {
+		return nil
+	}
+	return commentRows(note.Message, width)
+}
+
 func (m Model) noteForLine(line diff.Line) (comments.Note, bool) {
 	if line.Anchor.Line == 0 {
 		return comments.Note{}, false
@@ -263,6 +391,22 @@ func (m Model) sidebarWidth() int {
 	return min(42, max(32, m.width/4))
 }
 
+func (m Model) diffWidth() int {
+	return max(10, m.width-m.sidebarWidth()-1)
+}
+
+func (m Model) editorInputWidth() int {
+	return max(1, m.diffWidth()-lipgloss.Width(editorContinuation)-1)
+}
+
+func (m Model) editorTextHeight() int {
+	return clamp(wrappedLineCount(m.input.Value(), m.editorInputWidth()), 1, editorMaxTextRows)
+}
+
+func (m Model) editorVisualHeight() int {
+	return 1 + m.editorTextHeight()
+}
+
 func (m Model) bodyY(screenY int) (int, bool) {
 	y := screenY - 1
 	if y < 0 || y >= m.bodyHeight() {
@@ -280,6 +424,76 @@ func (m Model) divider() string {
 		style = focusedBorderStyle
 	}
 	return style.Render("|")
+}
+
+func splitCommentLines(message string) []string {
+	parts := strings.Split(strings.TrimSpace(message), "\n")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	if len(out) == 0 {
+		return []string{""}
+	}
+	return out
+}
+
+func commentRows(message string, width int) []string {
+	firstPrefix := editorIndent + "comment: "
+	nextPrefix := editorContinuation
+	firstWidth := max(1, width-lipgloss.Width(firstPrefix))
+	nextWidth := max(1, width-lipgloss.Width(nextPrefix))
+
+	var rows []string
+	for _, line := range splitCommentLines(message) {
+		for _, wrapped := range wrapText(line, firstWidth) {
+			if len(rows) == 0 {
+				rows = append(rows, firstPrefix+wrapped)
+				continue
+			}
+			rows = append(rows, nextPrefix+wrapped)
+		}
+		firstWidth = nextWidth
+	}
+	if len(rows) == 0 {
+		return []string{firstPrefix}
+	}
+	return rows
+}
+
+func wrappedLineCount(text string, width int) int {
+	text = strings.TrimRight(text, "\n")
+	if text == "" {
+		text = " "
+	}
+	count := 0
+	for _, line := range strings.Split(text, "\n") {
+		count += max(1, len(wrapText(line, width)))
+	}
+	return count
+}
+
+func wrapText(text string, width int) []string {
+	width = max(1, width)
+	if text == "" {
+		return []string{""}
+	}
+
+	var rows []string
+	var current strings.Builder
+	for _, r := range text {
+		part := string(r)
+		if lipgloss.Width(current.String()+part) > width && current.Len() > 0 {
+			rows = append(rows, current.String())
+			current.Reset()
+		}
+		current.WriteRune(r)
+	}
+	rows = append(rows, current.String())
+	return rows
 }
 
 func fit(text string, width int) string {
