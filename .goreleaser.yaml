@@ -84,10 +84,10 @@ homebrew_casks:
       owner: alexfedosov
       name: homebrew-tap
       branch: main
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+      token: '{{ envOrDefault "HOMEBREW_TAP_TOKEN" "" }}'
     commit_author:
       name: github-actions[bot]
       email: 41898282+github-actions[bot]@users.noreply.github.com
     homepage: https://github.com/alexfedosov/diffnotes
     description: A terminal Git diff review tool for collecting line comments for coding agents.
-    skip_upload: '{{ if eq .Env.HOMEBREW_TAP_TOKEN "" }}true{{ else }}auto{{ end }}'
+    skip_upload: '{{ if isEnvSet "HOMEBREW_TAP_TOKEN" }}auto{{ else }}true{{ end }}'
