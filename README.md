@@ -71,7 +71,9 @@ Clipboard copy uses the native command available on the current platform:
 - Linux X11: `xclip` or `xsel`
 - Windows: `clip`
 
-On Linux, install one of the supported clipboard tools if `c` reports that no clipboard command was found.
+When running over SSH, `diffnotes` prefers OSC 52 clipboard sequences so the copy goes to the clipboard of the local terminal, not the remote Linux machine. Your local terminal must allow OSC 52 clipboard access. If you run inside tmux and copy does not reach your local clipboard, enable clipboard passthrough in tmux, for example with `set -g set-clipboard on`.
+
+Set `DIFFNOTES_CLIPBOARD=osc52` to force OSC 52, or `DIFFNOTES_CLIPBOARD=native` to force native clipboard commands. On local Linux, install one of the supported clipboard tools if `c` reports that no clipboard command was found.
 
 ## Export Format
 
