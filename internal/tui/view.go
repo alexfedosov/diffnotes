@@ -8,6 +8,7 @@ import (
 
 	"github.com/alexfedosov/diffnotes/internal/comments"
 	"github.com/alexfedosov/diffnotes/internal/diff"
+	"github.com/alexfedosov/diffnotes/internal/syntax"
 )
 
 const sidebarHeaderLines = 2
@@ -283,6 +284,9 @@ func (m Model) renderDiffRow(row diff.Row, width int, selected bool) string {
 			text = ""
 			break
 		}
+		if !selected {
+			return m.renderHighlightedCodeLine(row, width)
+		}
 		text, style = m.renderCodeLine(*line)
 	default:
 		style = contextStyle
@@ -302,8 +306,13 @@ func (m Model) renderDiffRow(row diff.Row, width int, selected bool) string {
 }
 
 func (m Model) renderCodeLine(line diff.Line) (string, lipgloss.Style) {
+	prefix, content, style := m.codeLineParts(line)
+	return prefix + content, style
+}
+
+func (m Model) codeLineParts(line diff.Line) (string, string, lipgloss.Style) {
 	if line.Kind == diff.Meta {
-		return "            " + line.Content, metaStyle
+		return "            ", line.Content, metaStyle
 	}
 
 	prefix := " "
@@ -324,7 +333,111 @@ func (m Model) renderCodeLine(line diff.Line) (string, lipgloss.Style) {
 		note = "*"
 	}
 
-	return fmt.Sprintf("%s %s %s %s %s", oldNo, newNo, note, prefix, line.Content), style
+	return fmt.Sprintf("%s %s %s %s ", oldNo, newNo, note, prefix), line.Content, style
+}
+
+func (m Model) renderHighlightedCodeLine(row diff.Row, width int) string {
+	line := row.Line
+	if line == nil {
+		return metaStyle.Width(width).Render(strings.Repeat(" ", width))
+	}
+
+	prefix, content, style := m.codeLineParts(*line)
+	if line.Kind == diff.Meta {
+		return style.Width(width).Render(fit(prefix+content, width))
+	}
+
+	path := line.Anchor.File
+	if row.File != nil {
+		path = row.File.DisplayPath()
+	}
+	return renderSyntaxLine(prefix, syntax.Highlight(path, content), style, width)
+}
+
+func renderSyntaxLine(prefix string, segments []syntax.Segment, base lipgloss.Style, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	if lipgloss.Width(prefix) >= width {
+		return base.Width(width).Render(fit(prefix, width))
+	}
+
+	var builder strings.Builder
+	builder.WriteString(base.Inline(true).Render(prefix))
+	builder.WriteString(renderSyntaxSegments(segments, width-lipgloss.Width(prefix), base))
+	return builder.String()
+}
+
+func renderSyntaxSegments(segments []syntax.Segment, width int, base lipgloss.Style) string {
+	if width <= 0 {
+		return ""
+	}
+
+	plainWidth := lipgloss.Width(syntax.PlainText(segments))
+	limit := width
+	clipped := plainWidth > width
+	if clipped && width > 1 {
+		limit = width - 1
+	}
+
+	var builder strings.Builder
+	used := 0
+	for _, segment := range segments {
+		if used >= limit {
+			break
+		}
+		part, partWidth := takeWidth(segment.Text, limit-used)
+		if part == "" {
+			continue
+		}
+		builder.WriteString(segmentStyle(base, segment).Inline(true).Render(part))
+		used += partWidth
+	}
+
+	if clipped && width > 1 {
+		builder.WriteString(base.Inline(true).Render(">"))
+		used++
+	}
+	if used < width {
+		builder.WriteString(base.Inline(true).Render(strings.Repeat(" ", width-used)))
+	}
+	return builder.String()
+}
+
+func segmentStyle(base lipgloss.Style, segment syntax.Segment) lipgloss.Style {
+	style := base
+	if segment.Color != "" {
+		style = style.Foreground(lipgloss.Color(segment.Color))
+	}
+	if segment.Bold {
+		style = style.Bold(true)
+	}
+	if segment.Italic {
+		style = style.Italic(true)
+	}
+	if segment.Underline {
+		style = style.Underline(true)
+	}
+	return style
+}
+
+func takeWidth(text string, width int) (string, int) {
+	if width <= 0 || text == "" {
+		return "", 0
+	}
+
+	var builder strings.Builder
+	used := 0
+	for _, r := range text {
+		part := string(r)
+		partWidth := lipgloss.Width(part)
+		if used+partWidth > width {
+			break
+		}
+		builder.WriteRune(r)
+		used += partWidth
+	}
+	return builder.String(), used
 }
 
 func (m Model) renderCommentRow(text string, width int) string {
