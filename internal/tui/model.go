@@ -48,6 +48,7 @@ type Model struct {
 	selectedRow  int
 	diffOffset   int
 	commentsOnly bool
+	diffRequest  int
 
 	focus focusPane
 	mode  mode
@@ -67,10 +68,11 @@ type sourcesLoadedMsg struct {
 }
 
 type diffLoadedMsg struct {
-	source git.Source
-	files  []diff.File
-	rows   []diff.Row
-	err    error
+	request int
+	source  git.Source
+	files   []diff.File
+	rows    []diff.Row
+	err     error
 }
 
 func NewModel(path string, commitLimit int) Model {
@@ -121,10 +123,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if len(m.sources) == 0 {
 			return m, nil
 		}
-		m.loading = true
-		return m, loadDiffCmd(m.repo, m.sources[m.selectedSource])
+		return m.openSource(m.sources[m.selectedSource])
 
 	case diffLoadedMsg:
+		if msg.request != m.diffRequest {
+			return m, nil
+		}
 		m.loading = false
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -170,6 +174,7 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "l", "right", "f":
 		m.focus = focusDiff
 	case "r":
+		m.diffRequest++
 		m.loading = true
 		m.status = "reloading repository"
 		return m, loadSourcesCmd(m.cwd, m.commitLimit)
@@ -293,9 +298,15 @@ func (m *Model) openSelectedSource() (tea.Model, tea.Cmd) {
 		return *m, nil
 	}
 	source := m.sources[m.selectedSource]
+	return m.openSource(source)
+}
+
+func (m *Model) openSource(source git.Source) (tea.Model, tea.Cmd) {
+	m.diffRequest++
+	request := m.diffRequest
 	m.loading = true
 	m.status = "loading " + source.Title
-	return *m, loadDiffCmd(m.repo, source)
+	return *m, loadDiffCmd(m.repo, request, source)
 }
 
 func (m *Model) startEdit() {
@@ -644,14 +655,14 @@ func loadSourcesCmd(path string, commitLimit int) tea.Cmd {
 	}
 }
 
-func loadDiffCmd(repo string, source git.Source) tea.Cmd {
+func loadDiffCmd(repo string, request int, source git.Source) tea.Cmd {
 	return func() tea.Msg {
 		raw, err := git.Diff(repo, source)
 		if err != nil {
-			return diffLoadedMsg{source: source, err: err}
+			return diffLoadedMsg{request: request, source: source, err: err}
 		}
 		files := diff.Parse(raw)
-		return diffLoadedMsg{source: source, files: files, rows: diff.Flatten(files)}
+		return diffLoadedMsg{request: request, source: source, files: files, rows: diff.Flatten(files)}
 	}
 }
 
