@@ -1,5 +1,5 @@
 {"version":2,"width":100,"height":30,"timestamp":1778147350,"title":"diffnotes usage tour","env":{"SHELL":"/bin/zsh","TERM":"xterm-256color"}}
-[0.200000,"o","\u001b[2J\u001b[H\u001b[1;36m# diffnotes usage tour\u001b[0m\r\n\r\nUse this tool when you want to review local git changes, leave line comments,\r\nand copy a structured prompt for an LLM coding agent.\r\n\r\nThis recording uses the diffnotes repository itself as the example repo.\r\n"]
+[0.000000,"o","\u001b[2J\u001b[H\u001b[1;36m# diffnotes usage tour\u001b[0m\r\n\r\nUse this tool when you want to review local git changes, leave line comments,\r\nand copy a structured prompt for an LLM coding agent.\r\n\r\nThis recording uses the diffnotes repository itself as the example repo.\r\n"]
 [1.200000,"o","\r\n\u001b[1;32m$ git clone git@github.com:alexfedosov/diffnotes.git\u001b[0m\r\nCloning into 'diffnotes'...\r\n"]
 [2.100000,"o","\u001b[1;32m$ cd diffnotes\u001b[0m\r\n"]
 [2.800000,"o","\u001b[1;32m$ git status --short\u001b[0m\r\n M README.md\r\n M internal/clipboard/clipboard.go\r\n"]

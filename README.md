@@ -19,9 +19,9 @@ go run ./cmd/diffnotes --repo /path/to/repo
 
 ## Demo
 
-[![diffnotes asciinema usage demo](docs/usage.svg)](docs/usage.cast)
+[![diffnotes asciinema usage demo](docs/usage.gif)](docs/usage.cast)
 
-The embedded demo is generated from the local asciinema cast and uses this repository as the review target. It walks through opening unstaged changes, adding inline comments, folding to comment context, and copying the agent-ready review text.
+The embedded GIF is generated from the local asciinema cast and uses this repository as the review target. It walks through opening unstaged changes, adding inline comments, folding to comment context, and copying the agent-ready review text.
 
 For terminal playback:
 
