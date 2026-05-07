@@ -12,9 +12,11 @@ import (
 
 var version = "dev"
 
+const defaultCommitLimit = 10
+
 func main() {
 	repoPath := flag.String("repo", ".", "path inside the git repository to review")
-	commitLimit := flag.Int("commits", 50, "number of recent commits to show in the sidebar")
+	commitLimit := flag.Int("commits", defaultCommitLimit, "number of recent commits to show in the sidebar")
 	showVersion := flag.Bool("version", false, "print version and exit")
 	flag.Parse()
 
