@@ -75,6 +75,14 @@ type diffLoadedMsg struct {
 	err     error
 }
 
+type clipboardCopiedMsg struct {
+	count int
+	tool  string
+	err   error
+}
+
+var clipboardWrite = clipboard.Write
+
 func NewModel(path string, commitLimit int) Model {
 	input := textarea.New()
 	input.Placeholder = "Leave a review comment"
@@ -144,6 +152,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.status = "no diff for " + msg.source.Title
 		} else {
 			m.status = "loaded " + msg.source.Title
+		}
+		return m, nil
+
+	case clipboardCopiedMsg:
+		if msg.err != nil {
+			m.status = msg.err.Error()
+		} else {
+			m.status = fmt.Sprintf("copied %d comments using %s", msg.count, msg.tool)
 		}
 		return m, nil
 
@@ -222,7 +238,9 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "d", "x":
 		m.deleteCurrentNote()
 	case "c", "y":
-		m.copyNotes()
+		cmd := m.copyNotes()
+		m.ensureVisible()
+		return m, cmd
 	}
 	m.ensureVisible()
 	return m, nil
@@ -390,19 +408,16 @@ func (m *Model) toggleCommentsOnly() {
 	m.ensureDiffVisible()
 }
 
-func (m *Model) copyNotes() {
+func (m *Model) copyNotes() tea.Cmd {
 	notes := m.notes.List()
 	if len(notes) == 0 {
 		m.status = "no comments to copy"
-		return
+		return nil
 	}
 	text := comments.Format(notes)
-	tool, err := clipboard.Write(text)
-	if err != nil {
-		m.status = err.Error()
-		return
-	}
-	m.status = fmt.Sprintf("copied %d comments using %s", len(notes), tool)
+	count := len(notes)
+	m.status = fmt.Sprintf("copying %d comments", count)
+	return copyNotesCmd(count, text)
 }
 
 func (m *Model) currentLine() (*diff.Line, bool) {
@@ -663,6 +678,13 @@ func loadDiffCmd(repo string, request int, source git.Source) tea.Cmd {
 		}
 		files := diff.Parse(raw)
 		return diffLoadedMsg{request: request, source: source, files: files, rows: diff.Flatten(files)}
+	}
+}
+
+func copyNotesCmd(count int, text string) tea.Cmd {
+	return func() tea.Msg {
+		tool, err := clipboardWrite(text)
+		return clipboardCopiedMsg{count: count, tool: tool, err: err}
 	}
 }
 
