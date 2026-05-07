@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
@@ -75,10 +76,10 @@ var (
 				Foreground(lipgloss.Color("#0d1117")).
 				Background(lipgloss.Color("#f2cc60")).
 				Bold(true)
-	selectedBlurredStyle = lipgloss.NewStyle().
-				Foreground(lipgloss.Color("#f0f6fc")).
-				Background(lipgloss.Color("#30363d")).
-				Bold(true)
+	selectedUnfocusedDiffStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#f0f6fc")).
+					Background(lipgloss.Color("#30363d")).
+					Bold(true)
 	focusedBorderStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#58a6ff"))
 	unfocusedBorderStyle = lipgloss.NewStyle().
@@ -300,23 +301,14 @@ func (m Model) renderDiffRow(row diff.Row, width int, selected bool) string {
 			text = ""
 			break
 		}
-		if !selected {
-			return m.renderHighlightedCodeLine(row, width)
-		}
-		text, style = m.renderCodeLine(*line)
+		return m.renderHighlightedCodeLine(row, width, selected)
 	default:
 		style = contextStyle
 		text = ""
 	}
 
 	if selected {
-		if m.focus == focusDiff {
-			style = selectedDiffStyle
-			text = "> " + text
-		} else {
-			style = selectedBlurredStyle
-			text = "  " + text
-		}
+		style = m.selectedRowStyle()
 	}
 	return style.Width(width).Render(fit(text, width))
 }
@@ -352,13 +344,16 @@ func (m Model) codeLineParts(line diff.Line) (string, string, lipgloss.Style) {
 	return fmt.Sprintf("%s %s %s %s ", oldNo, newNo, note, prefix), line.Content, style
 }
 
-func (m Model) renderHighlightedCodeLine(row diff.Row, width int) string {
+func (m Model) renderHighlightedCodeLine(row diff.Row, width int, selected bool) string {
 	line := row.Line
 	if line == nil {
 		return metaStyle.Width(width).Render(strings.Repeat(" ", width))
 	}
 
 	prefix, content, style := m.codeLineParts(*line)
+	if selected {
+		style = m.selectedRowStyle()
+	}
 	if line.Kind == diff.Meta {
 		return style.Width(width).Render(fit(prefix+content, width))
 	}
@@ -367,10 +362,17 @@ func (m Model) renderHighlightedCodeLine(row diff.Row, width int) string {
 	if row.File != nil {
 		path = row.File.DisplayPath()
 	}
-	return renderSyntaxLine(prefix, syntax.Highlight(path, content), style, width)
+	return renderSyntaxLine(prefix, syntax.Highlight(path, content), style, width, selected && m.focus == focusDiff)
 }
 
-func renderSyntaxLine(prefix string, segments []syntax.Segment, base lipgloss.Style, width int) string {
+func (m Model) selectedRowStyle() lipgloss.Style {
+	if m.focus == focusDiff {
+		return selectedDiffStyle
+	}
+	return selectedUnfocusedDiffStyle
+}
+
+func renderSyntaxLine(prefix string, segments []syntax.Segment, base lipgloss.Style, width int, selected bool) string {
 	if width <= 0 {
 		return ""
 	}
@@ -380,11 +382,11 @@ func renderSyntaxLine(prefix string, segments []syntax.Segment, base lipgloss.St
 
 	var builder strings.Builder
 	builder.WriteString(base.Inline(true).Render(prefix))
-	builder.WriteString(renderSyntaxSegments(segments, width-lipgloss.Width(prefix), base))
+	builder.WriteString(renderSyntaxSegments(segments, width-lipgloss.Width(prefix), base, selected))
 	return builder.String()
 }
 
-func renderSyntaxSegments(segments []syntax.Segment, width int, base lipgloss.Style) string {
+func renderSyntaxSegments(segments []syntax.Segment, width int, base lipgloss.Style, selected bool) string {
 	if width <= 0 {
 		return ""
 	}
@@ -406,7 +408,7 @@ func renderSyntaxSegments(segments []syntax.Segment, width int, base lipgloss.St
 		if part == "" {
 			continue
 		}
-		builder.WriteString(segmentStyle(base, segment).Inline(true).Render(part))
+		builder.WriteString(segmentStyle(base, segment, selected).Inline(true).Render(part))
 		used += partWidth
 	}
 
@@ -420,10 +422,14 @@ func renderSyntaxSegments(segments []syntax.Segment, width int, base lipgloss.St
 	return builder.String()
 }
 
-func segmentStyle(base lipgloss.Style, segment syntax.Segment) lipgloss.Style {
+func segmentStyle(base lipgloss.Style, segment syntax.Segment, selected bool) lipgloss.Style {
 	style := base
 	if segment.Color != "" {
-		style = style.Foreground(lipgloss.Color(segment.Color))
+		color := segment.Color
+		if selected {
+			color = selectedSyntaxColor(color)
+		}
+		style = style.Foreground(lipgloss.Color(color))
 	}
 	if segment.Bold {
 		style = style.Bold(true)
@@ -435,6 +441,64 @@ func segmentStyle(base lipgloss.Style, segment syntax.Segment) lipgloss.Style {
 		style = style.Underline(true)
 	}
 	return style
+}
+
+func selectedSyntaxColor(color string) string {
+	// TODO: Move hard-coded colors into a theme layer backed by user config.
+	switch strings.ToLower(color) {
+	case "#ff7b72", "#ffa198":
+		return "#7a1f1f"
+	case "#d2a8ff", "#bc8cff":
+		return "#5f2da8"
+	case "#79c0ff", "#a5d6ff":
+		return "#064f8c"
+	case "#7ee787", "#56d364":
+		return "#17692f"
+	case "#ffa657", "#ffdfb6":
+		return "#7a3e00"
+	case "#8b949e", "#c9d1d9", "#f0f6fc":
+		return "#0d1117"
+	}
+
+	r, g, b, ok := parseHexColor(color)
+	if !ok {
+		return "#0d1117"
+	}
+	switch {
+	case absInt(int(r)-int(g)) < 24 && absInt(int(g)-int(b)) < 24:
+		return "#0d1117"
+	case r > b && r > g && g > 96:
+		return "#7a3e00"
+	case r > g && r > b:
+		return "#7a1f1f"
+	case g > r && g > b:
+		return "#17692f"
+	case b > r && r > 96:
+		return "#5f2da8"
+	case b > r || b > g:
+		return "#064f8c"
+	default:
+		return "#0d1117"
+	}
+}
+
+func parseHexColor(color string) (uint8, uint8, uint8, bool) {
+	color = strings.TrimPrefix(strings.TrimSpace(color), "#")
+	if len(color) != 6 {
+		return 0, 0, 0, false
+	}
+	value, err := strconv.ParseUint(color, 16, 32)
+	if err != nil {
+		return 0, 0, 0, false
+	}
+	return uint8(value >> 16), uint8(value >> 8), uint8(value), true
+}
+
+func absInt(value int) int {
+	if value < 0 {
+		return -value
+	}
+	return value
 }
 
 func takeWidth(text string, width int) (string, int) {
