@@ -19,13 +19,15 @@ go run ./cmd/diffnotes --repo /path/to/repo
 
 ## Demo
 
-Play the local asciinema usage tour:
+[![diffnotes asciinema usage demo](docs/usage.svg)](docs/usage.cast)
+
+The embedded demo is generated from the local asciinema cast and uses this repository as the review target. It walks through opening unstaged changes, adding inline comments, folding to comment context, and copying the agent-ready review text.
+
+For terminal playback:
 
 ```sh
 asciinema play docs/usage.cast
 ```
-
-The recording uses this repository as the review target and walks through opening unstaged changes, adding inline comments, folding to comment context, and copying the agent-ready review text.
 
 Build release-ish local binaries:
 
