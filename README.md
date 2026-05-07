@@ -17,6 +17,16 @@ Or run from this checkout:
 go run ./cmd/diffnotes --repo /path/to/repo
 ```
 
+## Demo
+
+Play the local asciinema usage tour:
+
+```sh
+asciinema play docs/usage.cast
+```
+
+The recording uses this repository as the review target and walks through opening unstaged changes, adding inline comments, folding to comment context, and copying the agent-ready review text.
+
 Build release-ish local binaries:
 
 ```sh
