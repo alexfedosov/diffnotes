@@ -24,6 +24,28 @@ make build
 make build-linux
 ```
 
+## Releases
+
+GitHub Actions runs tests and cross-compiles macOS/Linux binaries on every push to `main` and every pull request.
+
+Tagged releases are handled by GoReleaser. Push a semver tag to publish a GitHub release:
+
+```sh
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+The release workflow publishes:
+
+- `darwin/amd64`, `darwin/arm64`, `linux/amd64`, and `linux/arm64` tarballs
+- `checksums.txt`
+- Linux packages: `.deb`, `.rpm`, `.apk`, and Arch Linux package archives
+- a Homebrew cask update when `HOMEBREW_TAP_TOKEN` is configured
+
+Homebrew publishing requires a separate tap repository, expected by default at `github.com/alexfedosov/homebrew-tap`, and a repository secret named `HOMEBREW_TAP_TOKEN` with contents write access to that tap. Without that secret, GitHub releases and Linux package artifacts still publish, but the Homebrew tap update is skipped.
+
+The generated Linux packages are release assets. To make `apt`, `dnf`, or `apk` install from a repository URL, publish those packages to a package repository service such as Cloudsmith, Gemfury, Packagecloud, or your own distro repository.
+
 ## Controls
 
 - `tab`, `h`, `l`, `s`, `f`: switch focus between sidebar and diff

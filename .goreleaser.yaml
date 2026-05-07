@@ -1,0 +1,93 @@
+version: 2
+
+project_name: diffnotes
+
+metadata:
+  mod_timestamp: "{{ .CommitTimestamp }}"
+
+before:
+  hooks:
+    - go mod tidy
+    - go test ./...
+
+builds:
+  - id: diffnotes
+    main: ./cmd/diffnotes
+    binary: diffnotes
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+    goarch:
+      - amd64
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+
+archives:
+  - id: archive
+    ids:
+      - diffnotes
+    formats:
+      - tar.gz
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+
+release:
+  github:
+    owner: alexfedosov
+    name: diffnotes
+  draft: false
+  prerelease: auto
+
+nfpms:
+  - id: linux_packages
+    package_name: diffnotes
+    ids:
+      - diffnotes
+    file_name_template: "{{ .ConventionalFileName }}"
+    vendor: alexfedosov
+    homepage: https://github.com/alexfedosov/diffnotes
+    maintainer: Alex Fedosov
+    description: A terminal Git diff review tool for collecting line comments for coding agents.
+    formats:
+      - deb
+      - rpm
+      - apk
+      - archlinux
+    bindir: /usr/bin
+
+homebrew_casks:
+  - name: diffnotes
+    ids:
+      - archive
+    binaries:
+      - diffnotes
+    repository:
+      owner: alexfedosov
+      name: homebrew-tap
+      branch: main
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    commit_author:
+      name: github-actions[bot]
+      email: 41898282+github-actions[bot]@users.noreply.github.com
+    homepage: https://github.com/alexfedosov/diffnotes
+    description: A terminal Git diff review tool for collecting line comments for coding agents.
+    skip_upload: '{{ if eq .Env.HOMEBREW_TAP_TOKEN "" }}true{{ else }}auto{{ end }}'
