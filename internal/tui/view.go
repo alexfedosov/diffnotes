@@ -204,21 +204,37 @@ func (m Model) renderDiff(height int, width int) []string {
 		return lines
 	}
 
-	for i := 0; i < height; i++ {
-		visible := m.visibleDiffLineAt(i, width)
-		if visible.rowIndex < 0 {
-			lines = append(lines, contextStyle.Width(width).Render(strings.Repeat(" ", width)))
+	for displayIndex := m.diffOffset; displayIndex < len(displayRows) && len(lines) < height; displayIndex++ {
+		rowIndex := displayRows[displayIndex]
+		if rowIndex < 0 || rowIndex >= len(m.rows) {
 			continue
 		}
-		if visible.editor {
-			lines = append(lines, m.renderEditorRow(width, visible.editorLine))
+
+		lines = append(lines, m.renderDiffRow(m.rows[rowIndex], width, rowIndex == m.selectedRow))
+		if len(lines) >= height {
+			break
+		}
+
+		if m.mode == modeEditing && rowIndex == m.selectedRow {
+			for _, editorRow := range m.editorRows(width) {
+				lines = append(lines, commentEditorStyle.Width(width).Render(fit(editorRow, width)))
+				if len(lines) >= height {
+					break
+				}
+			}
 			continue
 		}
-		if visible.comment != "" {
-			lines = append(lines, m.renderCommentRow(visible.comment, width))
-			continue
+
+		for _, comment := range m.inlineCommentsForRow(rowIndex, width) {
+			lines = append(lines, m.renderCommentRow(comment, width))
+			if len(lines) >= height {
+				break
+			}
 		}
-		lines = append(lines, m.renderDiffRow(m.rows[visible.rowIndex], width, visible.rowIndex == m.selectedRow))
+	}
+
+	for len(lines) < height {
+		lines = append(lines, contextStyle.Width(width).Render(strings.Repeat(" ", width)))
 	}
 	return lines
 }
