@@ -72,6 +72,16 @@ var (
 				Foreground(lipgloss.Color("#f0f6fc")).
 				Background(lipgloss.Color("#1f2937")).
 				Bold(true)
+	completionPopupStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#c9d1d9")).
+				Background(lipgloss.Color("#1f2937"))
+	completionPopupSelectedStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#f0f6fc")).
+					Background(lipgloss.Color("#30363d")).
+					Bold(true)
+	completionPopupHelpStyle = lipgloss.NewStyle().
+					Foreground(lipgloss.Color("#8b949e")).
+					Background(lipgloss.Color("#1f2937"))
 	selectedDiffStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#0d1117")).
 				Background(lipgloss.Color("#f2cc60")).
@@ -130,7 +140,7 @@ func (m Model) renderHeader() string {
 
 func (m Model) renderFooter() string {
 	if m.mode == modeEditing {
-		text := " editing inline comment  enter save  esc cancel"
+		text := " editing inline comment  enter save  tab/ctrl+y complete  ctrl+n/p select  esc close/cancel"
 		return footerStyle.Width(m.width).Render(fit(text, m.width))
 	}
 
@@ -237,6 +247,7 @@ func (m Model) renderDiff(height int, width int) []string {
 	for len(lines) < height {
 		lines = append(lines, contextStyle.Width(width).Render(strings.Repeat(" ", width)))
 	}
+	lines = m.overlayCompletionPopup(lines, width)
 	return lines
 }
 
@@ -548,6 +559,77 @@ func (m Model) editorRows(width int) []string {
 		rows = append(rows, editorContinuation+line)
 	}
 	return rows
+}
+
+func (m Model) overlayCompletionPopup(lines []string, width int) []string {
+	popupRows := m.completionPopupRows(width)
+	if len(popupRows) == 0 {
+		return lines
+	}
+
+	selectedLine := m.visualLineForRow(m.selectedRow)
+	if selectedLine < 0 {
+		return lines
+	}
+
+	start := selectedLine + 1 + m.editorVisualHeight()
+	if start >= len(lines) {
+		return lines
+	}
+
+	for i, row := range popupRows {
+		if start+i >= len(lines) {
+			break
+		}
+		lines[start+i] = row
+	}
+	return lines
+}
+
+func (m Model) completionPopupRows(width int) []string {
+	completion, ok := m.currentCompletion()
+	if !ok {
+		return nil
+	}
+
+	start := 0
+	if completion.selected >= maxCompletionPopupRows {
+		start = completion.selected - maxCompletionPopupRows + 1
+	}
+	end := min(len(completion.candidates), start+maxCompletionPopupRows)
+
+	rows := make([]string, 0, end-start+1)
+	for index := start; index < end; index++ {
+		marker := " "
+		style := completionPopupStyle
+		if index == completion.selected {
+			marker = ">"
+			style = completionPopupSelectedStyle
+		}
+		rows = append(rows, renderCompletionPopupLine(marker+" "+completion.candidates[index], width, style))
+	}
+	rows = append(rows, renderCompletionPopupLine("  ctrl+n/p select  tab/ctrl+y accept  esc close", width, completionPopupHelpStyle))
+	return rows
+}
+
+func renderCompletionPopupLine(text string, width int, style lipgloss.Style) string {
+	if width <= 0 {
+		return ""
+	}
+	left := editorContinuation
+	leftWidth := lipgloss.Width(left)
+	if leftWidth >= width {
+		return style.Width(width).Render(fit(text, width))
+	}
+
+	popupWidth := min(max(28, lipgloss.Width(text)+2), width-leftWidth)
+	var builder strings.Builder
+	builder.WriteString(contextStyle.Inline(true).Render(left))
+	builder.WriteString(style.Width(popupWidth).Render(fit(text, popupWidth)))
+	if remaining := width - leftWidth - popupWidth; remaining > 0 {
+		builder.WriteString(contextStyle.Width(remaining).Render(strings.Repeat(" ", remaining)))
+	}
+	return builder.String()
 }
 
 func (m Model) inlineCommentsForRow(rowIndex int, width int) []string {

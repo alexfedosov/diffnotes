@@ -4,6 +4,8 @@ import (
 	"errors"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/alexfedosov/diffnotes/internal/comments"
 	"github.com/alexfedosov/diffnotes/internal/diff"
 	"github.com/alexfedosov/diffnotes/internal/git"
@@ -104,4 +106,134 @@ func TestCopyNotesCommandReportsErrors(t *testing.T) {
 	if got.status != "copy failed" {
 		t.Fatalf("unexpected copy error status %q", got.status)
 	}
+}
+
+func TestCommentCompletionAcceptsWithTab(t *testing.T) {
+	model := completionTestModel()
+	model.startEdit()
+	model.input.InsertString("sele")
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyTab})
+	got := updated.(Model)
+	if got.input.Value() != "selectedSyntaxColor" {
+		t.Fatalf("unexpected completed input %q", got.input.Value())
+	}
+	if got.status != "completed selectedSyntaxColor" {
+		t.Fatalf("unexpected completion status %q", got.status)
+	}
+}
+
+func TestCommentCompletionAcceptsWithCtrlY(t *testing.T) {
+	model := completionTestModel()
+	model.startEdit()
+	model.input.InsertString("strings.To")
+	model.selectedRow = 3
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlY})
+	got := updated.(Model)
+	if got.input.Value() != "strings.ToLower" {
+		t.Fatalf("unexpected completed input %q", got.input.Value())
+	}
+}
+
+func TestCommentCompletionSelectionCyclesWithCtrlNAndCtrlP(t *testing.T) {
+	model := completionTestModel()
+	model.startEdit()
+	model.input.InsertString("sele")
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	got := updated.(Model)
+	if got.status != "completion 2/2: selectedStyle" {
+		t.Fatalf("unexpected next completion status %q", got.status)
+	}
+
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyTab})
+	got = updated.(Model)
+	if got.input.Value() != "selectedStyle" {
+		t.Fatalf("unexpected completed input after ctrl+n %q", got.input.Value())
+	}
+
+	model = completionTestModel()
+	model.startEdit()
+	model.input.InsertString("sele")
+	updated, _ = model.Update(tea.KeyMsg{Type: tea.KeyCtrlP})
+	got = updated.(Model)
+	if got.status != "completion 2/2: selectedStyle" {
+		t.Fatalf("unexpected previous completion status %q", got.status)
+	}
+}
+
+func TestEscClosesCommentCompletionBeforeCancelingEditor(t *testing.T) {
+	model := completionTestModel()
+	model.startEdit()
+	model.input.InsertString("sele")
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := updated.(Model)
+	if got.mode != modeEditing {
+		t.Fatal("first esc canceled the editor instead of closing completion")
+	}
+	if got.status != "completion closed" {
+		t.Fatalf("unexpected status after closing completion %q", got.status)
+	}
+	if _, ok := got.currentCompletion(); ok {
+		t.Fatal("completion stayed visible after esc")
+	}
+
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got = updated.(Model)
+	if got.mode != modeNormal {
+		t.Fatal("second esc did not cancel the editor")
+	}
+	if got.status != "comment canceled" {
+		t.Fatalf("unexpected status after canceling editor %q", got.status)
+	}
+}
+
+func TestCommentCompletionStaysWithinCurrentHunk(t *testing.T) {
+	model := completionTestModel()
+	model.startEdit()
+	model.input.InsertString("unrel")
+
+	if completion, ok := model.currentCompletion(); ok {
+		t.Fatalf("completion crossed hunk boundary: %#v", completion)
+	}
+}
+
+func completionTestModel() Model {
+	file := &diff.File{NewPath: "internal/tui/view.go"}
+	model := NewModel(".", 10)
+	model.width = 120
+	model.height = 30
+	model.focus = focusDiff
+	model.loadedSourceID = "source"
+	model.loadedSource = git.Source{ID: "source", Title: "Unstaged changes"}
+	model.rows = []diff.Row{
+		{Type: diff.RowFile, FileIndex: 0, Header: "internal/tui/view.go (modified)", File: file},
+		{Type: diff.RowHunk, FileIndex: 0, Header: "@@ -1,4 +1,4 @@", File: file},
+		{Type: diff.RowLine, FileIndex: 0, HunkIndex: 0, Line: &diff.Line{
+			Kind:    diff.Context,
+			Content: "func selectedSyntaxColor(selectedStyle string) string {",
+			OldLine: 1,
+			NewLine: 1,
+			Anchor:  diff.Anchor{File: "internal/tui/view.go", Side: "new", Line: 1},
+		}, File: file},
+		{Type: diff.RowLine, FileIndex: 0, HunkIndex: 0, Line: &diff.Line{
+			Kind:    diff.Context,
+			Content: "switch strings.ToLower(color) {",
+			OldLine: 2,
+			NewLine: 2,
+			Anchor:  diff.Anchor{File: "internal/tui/view.go", Side: "new", Line: 2},
+		}, File: file},
+		{Type: diff.RowHunk, FileIndex: 0, Header: "@@ -20,2 +20,2 @@", File: file},
+		{Type: diff.RowLine, FileIndex: 0, HunkIndex: 1, Line: &diff.Line{
+			Kind:    diff.Context,
+			Content: "func unrelatedCompletion() {}",
+			OldLine: 20,
+			NewLine: 20,
+			Anchor:  diff.Anchor{File: "internal/tui/view.go", Side: "new", Line: 20},
+		}, File: file},
+	}
+	model.selectedRow = 2
+	return model
 }

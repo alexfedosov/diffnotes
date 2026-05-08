@@ -53,9 +53,10 @@ type Model struct {
 	focus focusPane
 	mode  mode
 
-	notes  *comments.Store
-	input  textarea.Model
-	editID string
+	notes      *comments.Store
+	input      textarea.Model
+	editID     string
+	completion completionMenuState
 
 	status  string
 	loading bool
@@ -252,21 +253,72 @@ func (m Model) updateEditor(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "esc":
+			if completion, ok := m.currentCompletion(); ok {
+				m.completion = completionMenuState{hiddenPrefix: completion.prefix}
+				m.status = "completion closed"
+				return m, nil
+			}
 			m.mode = modeNormal
 			m.input.Blur()
+			m.completion = completionMenuState{}
 			m.status = "comment canceled"
 			return m, nil
+		case "ctrl+e":
+			if completion, ok := m.currentCompletion(); ok {
+				m.completion = completionMenuState{hiddenPrefix: completion.prefix}
+				m.status = "completion closed"
+				return m, nil
+			}
+		case "tab", "ctrl+y":
+			if completion, ok := m.currentCompletion(); ok {
+				m.input.InsertString(completion.suffix())
+				m.completion = completionMenuState{}
+				m.configureEditor()
+				m.ensureEditorVisible()
+				m.status = "completed " + completion.candidate()
+				return m, nil
+			}
+		case "ctrl+n":
+			if m.moveCompletionSelection(1) {
+				return m, nil
+			}
+		case "ctrl+p":
+			if m.moveCompletionSelection(-1) {
+				return m, nil
+			}
 		case "enter":
 			m.saveComment()
 			return m, nil
 		}
 	}
 
+	before := m.input.Value()
+	beforePrefix := m.editorWordPrefix()
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	if m.input.Value() != before || m.editorWordPrefix() != beforePrefix {
+		m.completion = completionMenuState{}
+	}
 	m.configureEditor()
 	m.ensureEditorVisible()
 	return m, cmd
+}
+
+func (m *Model) moveCompletionSelection(delta int) bool {
+	completion, ok := m.currentCompletion()
+	if !ok {
+		return false
+	}
+	next := completion.selected + delta
+	if next < 0 {
+		next = len(completion.candidates) - 1
+	}
+	if next >= len(completion.candidates) {
+		next = 0
+	}
+	m.completion = completionMenuState{selected: next}
+	m.status = fmt.Sprintf("completion %d/%d: %s", next+1, len(completion.candidates), completion.candidates[next])
+	return true
 }
 
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
@@ -341,6 +393,7 @@ func (m *Model) startEdit() {
 		m.input.SetValue("")
 	}
 	m.editID = id
+	m.completion = completionMenuState{}
 	m.mode = modeEditing
 	m.input.Focus()
 	m.input.CursorEnd()
@@ -380,6 +433,7 @@ func (m *Model) saveComment() {
 
 	m.mode = modeNormal
 	m.input.Blur()
+	m.completion = completionMenuState{}
 	m.status = fmt.Sprintf("saved comment for %s:%d", note.File, note.Line)
 }
 

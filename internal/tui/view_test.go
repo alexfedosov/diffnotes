@@ -100,6 +100,41 @@ func TestTakeWidthDoesNotSplitPastLimit(t *testing.T) {
 	}
 }
 
+func TestCommentCompletionRendersPopupWithoutExpandingEditor(t *testing.T) {
+	model := completionTestModel()
+	model.startEdit()
+	model.input.InsertString("sele")
+
+	if got := model.editorVisualHeight(); got != 2 {
+		t.Fatalf("completion should not expand editor height, got %d", got)
+	}
+
+	rows := model.renderDiff(model.bodyHeight(), model.diffWidth())
+	selectedLine := model.visualLineForRow(model.selectedRow)
+	inputLine := selectedLine + model.editorVisualHeight()
+	popupLine := inputLine + 1
+	if inputLine >= len(rows) || popupLine >= len(rows) {
+		t.Fatalf("test rows did not include editor and popup lines")
+	}
+	if input := stripANSI(rows[inputLine]); !strings.Contains(input, "sele") || strings.Contains(input, "selectedSyntaxColor") {
+		t.Fatalf("popup overlapped input row: %q", input)
+	}
+	if popup := stripANSI(rows[popupLine]); !strings.Contains(popup, "> selectedSyntaxColor") {
+		t.Fatalf("popup did not render below input row: %q", popup)
+	}
+
+	view := stripANSI(model.View())
+	if !strings.Contains(view, "> selectedSyntaxColor") {
+		t.Fatalf("completion popup was not rendered:\n%s", view)
+	}
+	if !strings.Contains(view, "  selectedStyle") {
+		t.Fatalf("second completion candidate was not rendered:\n%s", view)
+	}
+	if !strings.Contains(view, "ctrl+n/p select  tab/ctrl+y accept") {
+		t.Fatalf("completion accept help was not rendered:\n%s", view)
+	}
+}
+
 // stripANSI lets tests compare visible terminal text without style escape codes.
 func stripANSI(text string) string {
 	return ansiPattern.ReplaceAllString(text, "")
