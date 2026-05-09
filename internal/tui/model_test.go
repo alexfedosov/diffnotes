@@ -200,6 +200,34 @@ func TestCommentCompletionStaysWithinCurrentHunk(t *testing.T) {
 	}
 }
 
+func TestToggleSplitView(t *testing.T) {
+	model := NewModel(".", 10)
+	model.width = 120
+	model.height = 30
+
+	if model.splitView {
+		t.Fatal("expected split view to be disabled by default")
+	}
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	got := updated.(Model)
+	if !got.splitView {
+		t.Fatal("expected split view to be enabled after toggling")
+	}
+	if got.status != "split view enabled" {
+		t.Fatalf("unexpected status after enabling split view: %q", got.status)
+	}
+
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'v'}})
+	got = updated.(Model)
+	if got.splitView {
+		t.Fatal("expected split view to be disabled after toggling again")
+	}
+	if got.status != "unified view enabled" {
+		t.Fatalf("unexpected status after disabling split view: %q", got.status)
+	}
+}
+
 func completionTestModel() Model {
 	file := &diff.File{NewPath: "internal/tui/view.go"}
 	model := NewModel(".", 10)

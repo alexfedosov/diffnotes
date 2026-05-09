@@ -18,6 +18,7 @@ const editorMaxTextRows = 8
 const (
 	editorIndent       = "              "
 	editorContinuation = "                "
+	displayTab         = "    "
 )
 
 var (
@@ -94,6 +95,8 @@ var (
 				Foreground(lipgloss.Color("#58a6ff"))
 	unfocusedBorderStyle = lipgloss.NewStyle().
 				Foreground(lipgloss.Color("#30363d"))
+	splitGutterStyle = lipgloss.NewStyle().
+				Foreground(lipgloss.Color("#30363d"))
 )
 
 func (m Model) View() string {
@@ -131,6 +134,8 @@ func (m Model) renderHeader() string {
 	text := fmt.Sprintf("%s repo:%s  source:%s  comments:%d", prefix, repo, source, m.notes.Len())
 	if m.commentsOnly {
 		text += "  view:comments"
+	} else if m.splitView {
+		text += "  view:split"
 	}
 	if m.loading {
 		text += "  loading"
@@ -144,7 +149,7 @@ func (m Model) renderFooter() string {
 		return footerStyle.Width(m.width).Render(fit(text, m.width))
 	}
 
-	text := " tab focus  j/k move  enter open/comment  a/e edit  d delete  z fold-comments  c copy  r reload  q quit"
+	text := " tab focus  j/k move  enter open/comment  a/e edit  d delete  z fold-comments  v split  c copy  r reload  q quit"
 	if m.status != "" {
 		text = m.status + " | " + text
 	}
@@ -312,6 +317,9 @@ func (m Model) renderDiffRow(row diff.Row, width int, selected bool) string {
 			text = ""
 			break
 		}
+		if m.splitView {
+			return m.renderSplitDiffRow(row, width, selected)
+		}
 		return m.renderHighlightedCodeLine(row, width, selected)
 	default:
 		style = contextStyle
@@ -376,6 +384,112 @@ func (m Model) renderHighlightedCodeLine(row diff.Row, width int, selected bool)
 	return renderSyntaxLine(prefix, syntax.Highlight(path, content), style, width, selected && m.focus == focusDiff)
 }
 
+func (m Model) renderSplitDiffRow(row diff.Row, width int, selected bool) string {
+	line := row.Line
+	if line == nil {
+		return metaStyle.Width(width).Render(strings.Repeat(" ", width))
+	}
+
+	leftWidth := width / 2
+	rightWidth := width - leftWidth - 1
+
+	var leftStr, rightStr string
+
+	switch line.Kind {
+	case diff.Add:
+		leftStr = m.renderSplitLineHalf(row, leftWidth, "left", selected, true)
+		rightStr = m.renderSplitLineHalf(row, rightWidth, "right", selected, false)
+	case diff.Delete:
+		leftStr = m.renderSplitLineHalf(row, leftWidth, "left", selected, false)
+		rightStr = m.renderSplitLineHalf(row, rightWidth, "right", selected, true)
+	case diff.Meta:
+		prefix, content, style := m.splitCodeLineParts(*line, "left")
+		if selected {
+			style = m.selectedRowStyle()
+		}
+		leftStr = style.Width(leftWidth).Render(fit(prefix+content, leftWidth))
+		rightStr = contextStyle.Width(rightWidth).Render(strings.Repeat(" ", rightWidth))
+	default: // Context
+		leftStr = m.renderSplitLineHalf(row, leftWidth, "left", selected, false)
+		rightStr = m.renderSplitLineHalf(row, rightWidth, "right", selected, false)
+	}
+
+	var builder strings.Builder
+	builder.WriteString(leftStr)
+	builder.WriteString(splitGutterStyle.Render("│"))
+	builder.WriteString(rightStr)
+	return builder.String()
+}
+
+func (m Model) renderSplitLineHalf(row diff.Row, halfWidth int, side string, selected bool, blank bool) string {
+	if blank {
+		style := contextStyle
+		if selected {
+			style = m.selectedRowStyle()
+		}
+		return style.Width(halfWidth).Render(strings.Repeat(" ", halfWidth))
+	}
+
+	line := row.Line
+	prefix, content, style := m.splitCodeLineParts(*line, side)
+	if selected {
+		style = m.selectedRowStyle()
+	}
+	if line.Kind == diff.Meta {
+		return style.Width(halfWidth).Render(fit(prefix+content, halfWidth))
+	}
+
+	path := line.Anchor.File
+	if row.File != nil {
+		path = row.File.DisplayPath()
+	}
+	return renderSyntaxLine(prefix, syntax.Highlight(path, content), style, halfWidth, selected && m.focus == focusDiff)
+}
+
+func (m Model) splitCodeLineParts(line diff.Line, side string) (string, string, lipgloss.Style) {
+	if line.Kind == diff.Meta {
+		return "            ", line.Content, metaStyle
+	}
+
+	prefix := " "
+	style := contextStyle
+	switch line.Kind {
+	case diff.Add:
+		prefix = "+"
+		style = addStyle
+	case diff.Delete:
+		prefix = "-"
+		style = deleteStyle
+	}
+
+	if side == "left" {
+		if line.Kind == diff.Add {
+			return "          ", "", contextStyle
+		}
+		oldNo := lineNumber(line.OldLine)
+		if line.Kind == diff.Delete {
+			note := " "
+			if _, ok := m.noteForLine(line); ok {
+				note = "*"
+			}
+			return fmt.Sprintf("%s %s %s ", oldNo, note, prefix), line.Content, style
+		}
+		// Context on left: no note marker
+		return fmt.Sprintf("%s   %s ", oldNo, prefix), line.Content, style
+	}
+
+	// right side
+	if line.Kind == diff.Delete {
+		return "          ", "", contextStyle
+	}
+	newNo := lineNumber(line.NewLine)
+	note := " "
+	if _, ok := m.noteForLine(line); ok {
+		note = "*"
+	}
+	return fmt.Sprintf("%s %s %s ", newNo, note, prefix), line.Content, style
+}
+
 func (m Model) selectedRowStyle() lipgloss.Style {
 	if m.focus == focusDiff {
 		return selectedDiffStyle
@@ -402,7 +516,7 @@ func renderSyntaxSegments(segments []syntax.Segment, width int, base lipgloss.St
 		return ""
 	}
 
-	plainWidth := lipgloss.Width(syntax.PlainText(segments))
+	plainWidth := lipgloss.Width(displayText(syntax.PlainText(segments)))
 	limit := width
 	clipped := plainWidth > width
 	if clipped && width > 1 {
@@ -415,7 +529,7 @@ func renderSyntaxSegments(segments []syntax.Segment, width int, base lipgloss.St
 		if used >= limit {
 			break
 		}
-		part, partWidth := takeWidth(segment.Text, limit-used)
+		part, partWidth := takeWidth(displayText(segment.Text), limit-used)
 		if part == "" {
 			continue
 		}
@@ -775,15 +889,18 @@ func fit(text string, width int) string {
 	if width <= 0 {
 		return ""
 	}
+	text = displayText(text)
 	if lipgloss.Width(text) <= width {
 		return text + strings.Repeat(" ", width-lipgloss.Width(text))
 	}
-	runes := []rune(text)
 	if width <= 1 {
-		return string(runes[:min(len(runes), width)])
+		return ">"
 	}
-	if len(runes) <= width {
-		return text
-	}
-	return string(runes[:width-1]) + ">"
+
+	clipped, clippedWidth := takeWidth(text, width-1)
+	return clipped + strings.Repeat(" ", width-1-clippedWidth) + ">"
+}
+
+func displayText(text string) string {
+	return strings.ReplaceAll(text, "\t", displayTab)
 }

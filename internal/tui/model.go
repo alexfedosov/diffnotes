@@ -48,6 +48,7 @@ type Model struct {
 	selectedRow  int
 	diffOffset   int
 	commentsOnly bool
+	splitView    bool
 	diffRequest  int
 
 	focus focusPane
@@ -197,6 +198,8 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, loadSourcesCmd(m.cwd, m.commitLimit)
 	case "z":
 		m.toggleCommentsOnly()
+	case "v":
+		m.toggleSplitView()
 	case "up", "k":
 		if m.focus == focusSources {
 			m.moveSource(-1)
@@ -458,6 +461,17 @@ func (m *Model) toggleCommentsOnly() {
 		m.status = "showing comments with 3 lines of context"
 	} else {
 		m.status = "showing full diff"
+	}
+	m.ensureDiffVisible()
+}
+
+func (m *Model) toggleSplitView() {
+	m.splitView = !m.splitView
+	m.diffOffset = 0
+	if m.splitView {
+		m.status = "split view enabled"
+	} else {
+		m.status = "unified view enabled"
 	}
 	m.ensureDiffVisible()
 }
