@@ -105,16 +105,19 @@ func (m Model) View() string {
 	}
 
 	bodyHeight := m.bodyHeight()
-	sidebarWidth := m.sidebarWidth()
 	diffWidth := m.diffWidth()
 
-	sidebar := m.renderSidebar(bodyHeight, sidebarWidth)
 	diffPane := m.renderDiff(bodyHeight, diffWidth)
-	divider := m.divider()
 
 	body := make([]string, 0, bodyHeight)
-	for i := 0; i < bodyHeight; i++ {
-		body = append(body, sidebar[i]+divider+diffPane[i])
+	if m.sidebarHidden {
+		body = append(body, diffPane...)
+	} else {
+		sidebar := m.renderSidebar(bodyHeight, m.sidebarWidth())
+		divider := m.divider()
+		for i := 0; i < bodyHeight; i++ {
+			body = append(body, sidebar[i]+divider+diffPane[i])
+		}
 	}
 
 	return strings.Join([]string{
@@ -137,6 +140,9 @@ func (m Model) renderHeader() string {
 	} else if m.splitView {
 		text += "  view:split"
 	}
+	if m.sidebarHidden {
+		text += "  sidebar:hidden"
+	}
 	if m.loading {
 		text += "  loading"
 	}
@@ -149,7 +155,7 @@ func (m Model) renderFooter() string {
 		return footerStyle.Width(m.width).Render(fit(text, m.width))
 	}
 
-	text := " tab focus  j/k move  enter open/comment  a/e edit  d delete  z fold-comments  v split  c copy  r reload  q quit"
+	text := " tab focus  j/k move  enter open/comment  a/e edit  d delete  z fold-comments  v split  b sidebar  c copy  r reload  q quit"
 	if m.status != "" {
 		text = m.status + " | " + text
 	}
@@ -774,6 +780,9 @@ func (m Model) bodyHeight() int {
 }
 
 func (m Model) sidebarWidth() int {
+	if m.sidebarHidden {
+		return 0
+	}
 	if m.width < 84 {
 		return min(30, max(24, m.width/3))
 	}
@@ -781,6 +790,9 @@ func (m Model) sidebarWidth() int {
 }
 
 func (m Model) diffWidth() int {
+	if m.sidebarHidden {
+		return max(10, m.width)
+	}
 	return max(10, m.width-m.sidebarWidth()-1)
 }
 

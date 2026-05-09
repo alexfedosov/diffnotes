@@ -13,6 +13,7 @@ Review changes and commits in terminal, leave comments to specific parts, press 
 - `d` or `x`: delete the comment on the selected line
 - `z`: toggle folded comment view, showing each comment with three lines above it grouped by file
 - `v`: toggle between unified and split diff view
+- `b`: toggle sidebar visibility
 - `c` or `y`: copy all comments to the system clipboard
 - `r`: reload repository sources
 - `q`: quit

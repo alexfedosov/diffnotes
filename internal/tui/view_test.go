@@ -188,6 +188,26 @@ func TestSplitViewKeepsGutterAlignedForTabbedContent(t *testing.T) {
 	}
 }
 
+func TestHiddenSidebarRendersDiffAtFullWidth(t *testing.T) {
+	model := completionTestModel()
+	model.sidebarHidden = true
+
+	view := stripANSI(model.View())
+	lines := strings.Split(view, "\n")
+	if len(lines) < 3 {
+		t.Fatalf("expected header, body, and footer lines, got %d: %q", len(lines), view)
+	}
+	if !strings.Contains(lines[0], "sidebar:hidden") {
+		t.Fatalf("header did not show hidden sidebar state: %q", lines[0])
+	}
+	if strings.Contains(view, "SOURCES") {
+		t.Fatalf("hidden sidebar still rendered sources pane:\n%s", view)
+	}
+	if width := lipgloss.Width(lines[1]); width != model.width {
+		t.Fatalf("hidden sidebar body line width = %d, want %d: %q", width, model.width, lines[1])
+	}
+}
+
 func TestSplitViewAddShowsOnlyOnRight(t *testing.T) {
 	model := completionTestModel()
 	model.splitView = true

@@ -228,6 +228,55 @@ func TestToggleSplitView(t *testing.T) {
 	}
 }
 
+func TestToggleSidebarVisibility(t *testing.T) {
+	model := NewModel(".", 10)
+	model.width = 120
+	model.height = 30
+	model.focus = focusSources
+
+	updated, _ := model.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	got := updated.(Model)
+	if !got.sidebarHidden {
+		t.Fatal("expected sidebar to be hidden after toggling")
+	}
+	if got.focus != focusDiff {
+		t.Fatal("expected hiding sidebar to focus diff")
+	}
+	if got.status != "sidebar hidden" {
+		t.Fatalf("unexpected status after hiding sidebar: %q", got.status)
+	}
+	if got.sidebarWidth() != 0 {
+		t.Fatalf("hidden sidebar should have zero width, got %d", got.sidebarWidth())
+	}
+	if got.diffWidth() != got.width {
+		t.Fatalf("hidden sidebar should give full width to diff, got %d want %d", got.diffWidth(), got.width)
+	}
+
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyTab})
+	got = updated.(Model)
+	if got.focus != focusDiff {
+		t.Fatal("tab should keep focus on diff while sidebar is hidden")
+	}
+
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'h'}})
+	got = updated.(Model)
+	if got.focus != focusDiff {
+		t.Fatal("h should not focus the hidden sidebar")
+	}
+
+	updated, _ = got.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'b'}})
+	got = updated.(Model)
+	if got.sidebarHidden {
+		t.Fatal("expected sidebar to be shown after toggling again")
+	}
+	if got.status != "sidebar shown" {
+		t.Fatalf("unexpected status after showing sidebar: %q", got.status)
+	}
+	if got.sidebarWidth() == 0 {
+		t.Fatal("shown sidebar should have a non-zero width")
+	}
+}
+
 func completionTestModel() Model {
 	file := &diff.File{NewPath: "internal/tui/view.go"}
 	model := NewModel(".", 10)

@@ -43,13 +43,14 @@ type Model struct {
 	loadedSource   git.Source
 	loadedSourceID string
 
-	files        []diff.File
-	rows         []diff.Row
-	selectedRow  int
-	diffOffset   int
-	commentsOnly bool
-	splitView    bool
-	diffRequest  int
+	files         []diff.File
+	rows          []diff.Row
+	selectedRow   int
+	diffOffset    int
+	commentsOnly  bool
+	splitView     bool
+	sidebarHidden bool
+	diffRequest   int
 
 	focus focusPane
 	mode  mode
@@ -188,7 +189,9 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "tab":
 		m.toggleFocus()
 	case "h", "left", "s":
-		m.focus = focusSources
+		if !m.sidebarHidden {
+			m.focus = focusSources
+		}
 	case "l", "right", "f":
 		m.focus = focusDiff
 	case "r":
@@ -200,14 +203,16 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.toggleCommentsOnly()
 	case "v":
 		m.toggleSplitView()
+	case "b":
+		m.toggleSidebar()
 	case "up", "k":
-		if m.focus == focusSources {
+		if m.focus == focusSources && !m.sidebarHidden {
 			m.moveSource(-1)
 		} else {
 			m.moveRow(-1)
 		}
 	case "down", "j":
-		if m.focus == focusSources {
+		if m.focus == focusSources && !m.sidebarHidden {
 			m.moveSource(1)
 		} else {
 			m.moveRow(1)
@@ -217,7 +222,7 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "pgdown", " ":
 		m.movePage(1)
 	case "g":
-		if m.focus == focusSources {
+		if m.focus == focusSources && !m.sidebarHidden {
 			m.selectedSource = 0
 			m.sourceOffset = 0
 		} else {
@@ -225,7 +230,7 @@ func (m Model) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.diffOffset = 0
 		}
 	case "G":
-		if m.focus == focusSources {
+		if m.focus == focusSources && !m.sidebarHidden {
 			m.selectedSource = max(0, len(m.sources)-1)
 			m.ensureSourceVisible()
 		} else {
@@ -327,7 +332,7 @@ func (m *Model) moveCompletionSelection(delta int) bool {
 func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.MouseWheelUp:
-		if msg.X < m.sidebarWidth() {
+		if !m.sidebarHidden && msg.X < m.sidebarWidth() {
 			m.focus = focusSources
 			m.moveSource(-3)
 		} else {
@@ -335,7 +340,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.moveRow(-3)
 		}
 	case tea.MouseWheelDown:
-		if msg.X < m.sidebarWidth() {
+		if !m.sidebarHidden && msg.X < m.sidebarWidth() {
 			m.focus = focusSources
 			m.moveSource(3)
 		} else {
@@ -347,7 +352,7 @@ func (m *Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 		if !ok {
 			return *m, nil
 		}
-		if msg.X < m.sidebarWidth() {
+		if !m.sidebarHidden && msg.X < m.sidebarWidth() {
 			m.focus = focusSources
 			sourceIndex := m.sourceOffset + bodyY - sidebarHeaderLines
 			if sourceIndex >= 0 && sourceIndex < len(m.sources) {
@@ -476,6 +481,18 @@ func (m *Model) toggleSplitView() {
 	m.ensureDiffVisible()
 }
 
+func (m *Model) toggleSidebar() {
+	m.sidebarHidden = !m.sidebarHidden
+	if m.sidebarHidden {
+		m.focus = focusDiff
+		m.status = "sidebar hidden"
+	} else {
+		m.status = "sidebar shown"
+	}
+	m.configureEditor()
+	m.ensureVisible()
+}
+
 func (m *Model) copyNotes() tea.Cmd {
 	notes := m.notes.List()
 	if len(notes) == 0 {
@@ -523,7 +540,7 @@ func (m *Model) moveRow(delta int) {
 
 func (m *Model) movePage(delta int) {
 	amount := max(1, m.bodyHeight()-2)
-	if m.focus == focusSources {
+	if m.focus == focusSources && !m.sidebarHidden {
 		m.moveSource(delta * amount)
 	} else {
 		m.moveRow(delta * amount)
@@ -531,6 +548,10 @@ func (m *Model) movePage(delta int) {
 }
 
 func (m *Model) toggleFocus() {
+	if m.sidebarHidden {
+		m.focus = focusDiff
+		return
+	}
 	if m.focus == focusSources {
 		m.focus = focusDiff
 		return
